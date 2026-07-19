@@ -49,9 +49,17 @@ function stripFence(s) {
   return s.replace(/^\s*```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
 }
 
-// 宽松解析 LLM 输出为 JSON 对象
+// 剥推理思考标签：MiniMax M 系列 / GLM / DeepSeek-R1 等会在回答前吐 <think>...</think>，
+// think 块里若有 { 会污染 parseJsonObjectLoose 的首 { 提取，必须先剥。
+// 只剥闭合块（非流式响应 think 应闭合）；未闭合不剥，交给 parseJsonObjectLoose 的 { 提取兜底，
+// 避免 <think>...后接 JSON 被贪婪剥光。
+function stripThink(s) {
+  return String(s).replace(/<(think|thinking|reasoning|reflection|analysis)>[\s\S]*?<\/\1>/gi, "");
+}
+
+// 宽松解析 LLM 输出为 JSON 对象：先剥 think → 剥 fence → 直接 parse；失败取首 { 到末 }
 function parseJsonObjectLoose(raw) {
-  const s = stripFence(raw);
+  const s = stripFence(stripThink(raw));
   try { return JSON.parse(s); } catch {}
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
@@ -80,7 +88,8 @@ function placeholdersMatch(en, zh) {
 }
 
 // 通用 JSON HTTP 请求（零依赖，node 内置 https/http）
-function httpJsonRequest(urlStr, { headers, body, timeoutMs = 60000 }) {
+function httpJsonRequest(urlStr, { headers, body, timeoutMs }) {
+  const ms = timeoutMs || Number.parseInt(process.env.SKILL_I18N_REQUEST_TIMEOUT || "180000", 10) || 180000;
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
     const lib = u.protocol === "https:" ? https : http;
@@ -99,7 +108,7 @@ function httpJsonRequest(urlStr, { headers, body, timeoutMs = 60000 }) {
       });
     });
     req.on("error", reject);
-    req.setTimeout(timeoutMs, () => req.destroy(new Error("请求超时")));
+    req.setTimeout(ms, () => req.destroy(new Error("请求超时")));
     if (body) req.write(body);
     req.end();
   });
@@ -223,7 +232,8 @@ async function main() {
     // 本宿主 agent 翻译：stdin 是 {id: zh}，一次全读，不分批
     Object.assign(translations, await translateStdin());
   } else {
-    const BATCH = 30;
+    // 默认 10（非顶级推理 API 如 MiniMax/GLM 扛不住 30），可 SKILL_I18N_BATCH 调
+    const BATCH = Number.parseInt(process.env.SKILL_I18N_BATCH || "10", 10) || 10;
     for (let i = 0; i < toDo.length; i += BATCH) {
       const batch = toDo.slice(i, i + BATCH);
       try {
