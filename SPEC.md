@@ -187,7 +187,7 @@ function collectAll({ userRoot, pluginRoot }, followSymlinks) {
 
 - **多宿主工具集**（非单一 plugin）：CC skill 格式跨工具趋同，内核可复用 → 一个内核服务四工具
 - **渐进式挂载**（v1）：CC/zcode 完整 plugin+hook（自动）；opencode/codex 用 CLI 手动/定时，README 给可粘贴示例但不内置 → v2 按需加原生挂载（YAGNI）
-- **代码源自 claude-code-zh-cn skill-i18n**，上游保留不删（默认禁用、有存量用户）；短期双份，未来上游可标 deprecated 指向本仓库
+- **作者原创**：skill-i18n 代码由本仓库作者编写并提 PR 合入 claude-code-zh-cn，现抽成独立通用项目；上游那份保留不删（默认禁用、有存量用户）；短期双份，未来可统一
 - **汉化范围**：skill / command / 插件元数据 description；**不含 agents**（codex agent 是 toml、opencode agent 格式未稳，且原诉求是「Skill 说明」）
 - **env 前缀 `SKILL_I18N_*`**（去 `ZH_CN_`），避免与上游 `ZH_CN_SKILL_I18N_*` 冲突导致重复汉化
 - **插件名 `skill-zh-cn`**：与项目目录一致；当前只做中文
