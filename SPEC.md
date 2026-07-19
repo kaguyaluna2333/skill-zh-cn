@@ -32,8 +32,8 @@
 ## Commands
 
 ```bash
-# 测试（零依赖）
-node --test tests/
+# 测试（零依赖，glob；node --test 不支持目录参数）
+node --test tests/*.test.js
 
 # 通用 CLI —— 自动探测宿主
 skill-zh-cn                          # 自动探测，扫描该宿主 skill
@@ -142,7 +142,7 @@ function collectAll({ userRoot, pluginRoot }, followSymlinks) {
 
 ## Testing Strategy
 
-- **框架**：`node:test` + `node:assert/strict`，`node --test tests/` 运行，零依赖
+- **框架**：`node:test` + `node:assert/strict`，`node --test tests/*.test.js` 运行，零依赖
 - **位置**：`tests/`，镜像 `core/lib/*` 命名（`collect.test.js`、`hosts.test.js`…）
 - **必覆盖**：
   - `hosts.test.js`：四宿主探测（CC/zcode/opencode/codex 特征命中 + env 覆盖 + fallback）
