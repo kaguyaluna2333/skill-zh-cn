@@ -17,12 +17,14 @@ USER_ROOT="${SKILL_I18N_USER_ROOT:-${SKILL_I18N_ROOT:-}}"
 PLUGIN_ROOT="${SKILL_I18N_PLUGIN_ROOT:-${SKILL_I18N_ROOT:-}}"
 DRY_RUN=0
 PROVIDER="${SKILL_I18N_PROVIDER:-auto}"
+HOST=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --user-root|--scan-user-root) USER_ROOT="$2"; shift 2 ;;
         --plugin-root|--scan-plugin-root) PLUGIN_ROOT="$2"; shift 2 ;;
         --root|--scan-root) USER_ROOT="$2"; PLUGIN_ROOT="$2"; shift 2 ;;
+        --host) HOST="$2"; shift 2 ;;
         --cache-dir) CACHE_DIR="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --provider) PROVIDER="$2"; shift 2 ;;
@@ -30,7 +32,21 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# 默认根：未给则 CC 式 ~/.claude（兜底；CLI 入口 T6 / hook 会显式传宿主根）
+# --host：调 core/lib/hosts.js 解析该宿主的 userRoot/pluginRoot/cacheDir（覆盖 env 与 --root）
+if [ -n "$HOST" ]; then
+    resolved=$(node -e '
+        const h = require(process.argv[1]).resolve({ host: process.argv[2] });
+        process.stdout.write(h.userRoot + "\t" + h.pluginRoot + "\t" + h.cacheDir);
+    ' "$SCRIPT_DIR/lib/hosts" "$HOST" 2>/dev/null) || true
+    if [ -n "$resolved" ]; then
+        USER_ROOT="${resolved%%$'\t'*}"
+        rest="${resolved#*$'\t'}"
+        PLUGIN_ROOT="${rest%%$'\t'*}"
+        CACHE_DIR="${rest#*$'\t'*}"
+    fi
+fi
+
+# 默认根：未给且无 --host 时，CC 式 ~/.claude 兜底
 if [ -z "$USER_ROOT" ]; then USER_ROOT="$HOME/.claude"; fi
 if [ -z "$PLUGIN_ROOT" ]; then PLUGIN_ROOT="$HOME/.claude"; fi
 

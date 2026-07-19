@@ -1,0 +1,106 @@
+#!/usr/bin/env node
+// bin/skill-zh-cn — 跨宿主 skill 汉化通用 CLI。
+//
+// 自动探测宿主（无 --host/--root/--user-root 时按优先序 cc>zcode>opencode>codex），
+// 或显式 --host/--root 指定，透传 core/translate-skills.sh 流水线。
+// restore 子命令调 core/restore.js 还原。
+//
+// 用法：
+//   skill-zh-cn                          自动探测宿主，扫描并汉化
+//   skill-zh-cn --host <cc|zcode|opencode|codex>
+//   skill-zh-cn --root <dir>             双根相同（CC 式单根）
+//   skill-zh-cn --user-root X --plugin-root Y
+//   skill-zh-cn --dry-run | list         只看待译，不写盘
+//   skill-zh-cn restore [--host X | --root Y | --all]
+//
+// 翻译引擎 env：SKILL_I18N_PROVIDER / API_KEY / BASE_URL / MODEL
+// （provider=auto 默认调 claude CLI；openai/anthropic 需配 key+model）
+
+"use strict";
+
+const { spawn } = require("node:child_process");
+const path = require("node:path");
+const hosts = require(path.join(__dirname, "..", "core", "lib", "hosts"));
+
+const CORE_DIR = path.join(__dirname, "..", "core");
+
+function usage() {
+  console.error(`skill-zh-cn — 跨宿主 skill 说明汉化 CLI
+
+用法：
+  skill-zh-cn                            自动探测宿主，扫描并汉化
+  skill-zh-cn --host <cc|zcode|opencode|codex>
+  skill-zh-cn --root <dir>               双根相同（CC 式单根）
+  skill-zh-cn --user-root X --plugin-root Y
+  skill-zh-cn --dry-run | list           只列待译，不写盘
+  skill-zh-cn restore [--host X|--root Y|--all]
+
+翻译引擎 env：
+  SKILL_I18N_PROVIDER=auto|claude|openai|anthropic
+  SKILL_I18N_API_KEY / SKILL_I18N_BASE_URL / SKILL_I18N_MODEL`);
+}
+
+function parseArgs(argv) {
+  const a = { host: "", root: "", userRoot: "", pluginRoot: "", dryRun: false, command: "", all: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const k = argv[i];
+    if (k === "--host") a.host = argv[++i];
+    else if (k === "--root") a.root = argv[++i];
+    else if (k === "--user-root") a.userRoot = argv[++i];
+    else if (k === "--plugin-root") a.pluginRoot = argv[++i];
+    else if (k === "--dry-run") a.dryRun = true;
+    else if (k === "list") { a.dryRun = true; }
+    else if (k === "restore") a.command = "restore";
+    else if (k === "--all") a.all = true;
+    else if (k === "-h" || k === "--help") a.help = true;
+  }
+  return a;
+}
+
+function spawnInherit(cmd, args) {
+  const child = spawn(cmd, args, { stdio: "inherit" });
+  child.on("exit", (c) => process.exit(c || 0));
+}
+
+function runTranslate(args) {
+  const shArgs = [path.join(CORE_DIR, "translate-skills.sh")];
+  if (args.host) shArgs.push("--host", args.host);
+  else if (args.root) shArgs.push("--root", args.root);
+  else if (args.userRoot && args.pluginRoot) shArgs.push("--user-root", args.userRoot, "--plugin-root", args.pluginRoot);
+  if (args.dryRun) shArgs.push("--dry-run");
+  spawnInherit("bash", shArgs);
+}
+
+function runRestore(args) {
+  const restoreJs = path.join(CORE_DIR, "restore.js");
+  const rArgs = [restoreJs];
+  if (args.host) {
+    const r = hosts.resolve({ host: args.host });
+    rArgs.push("--user-root", r.userRoot, "--plugin-root", r.pluginRoot);
+  } else if (args.root) {
+    rArgs.push("--root", args.root);
+  } else if (args.all) {
+    rArgs.push("--all");
+  } else {
+    const r = hosts.resolve({});
+    rArgs.push("--user-root", r.userRoot, "--plugin-root", r.pluginRoot);
+  }
+  if (args.dryRun) rArgs.push("--dry-run");
+  spawnInherit("node", rArgs);
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) { usage(); process.exit(0); }
+
+  // 无 --host/--root/--user-root 且非 restore：自动探测宿主 → 转 --host
+  if (!args.host && !args.root && !args.userRoot && args.command !== "restore") {
+    const r = hosts.resolve({});
+    if (r.host) args.host = r.host;
+  }
+
+  if (args.command === "restore") return runRestore(args);
+  runTranslate(args);
+}
+
+main();
