@@ -134,8 +134,8 @@ function collectMarketplaces(pluginRoot, followSymlinks) {
   return collectFromRoots(roots, followSymlinks);
 }
 
-// 插件元数据 JSON：plugin.json（cache 下）+ marketplace.json（cache 下 + marketplaces 下）
-function collectMetadata(pluginRoot) {
+// 插件元数据 JSON：plugin.json（cache 下）+ marketplace.json（cache 下 + marketplaces 下，后者仅 includeMarketplaces）
+function collectMetadata(pluginRoot, includeMarketplaces = false) {
   const out = [];
   const seen = new Set();
   const add = (p) => { if (exists(p) && !seen.has(p)) { seen.add(p); out.push({ path: p, kind: "metadata" }); } };
@@ -154,23 +154,29 @@ function collectMetadata(pluginRoot) {
       }
     }
   }
-  const mpBase = path.join(pluginRoot, "plugins", "marketplaces");
-  for (const m of tryReadDir(mpBase)) {
-    if (!m.isDirectory()) continue;
-    add(path.join(mpBase, m.name, ".claude-plugin", "marketplace.json"));
+  if (includeMarketplaces) {
+    const mpBase = path.join(pluginRoot, "plugins", "marketplaces");
+    for (const m of tryReadDir(mpBase)) {
+      if (!m.isDirectory()) continue;
+      add(path.join(mpBase, m.name, ".claude-plugin", "marketplace.json"));
+    }
   }
   return out;
 }
 
-// 统一收集所有来源。多根：userRoot 扫 skills/commands，pluginRoot 扫 cache/marketplaces/metadata。
+// 统一收集所有来源。多根：userRoot 扫 skills/commands，pluginRoot 扫 cache/metadata。
+// includeMarketplaces 默认 false：不扫 plugins/marketplaces（那是插件 git 源码仓库，
+// 汉化会 git dirty 且运行时不读——运行读的是 cache 安装副本）。
+// restore 传 true 以便彻底清理任何已汉化文件（含源码里曾有标记的）。
 // 对 CC 传 { userRoot: A, pluginRoot: A }；对 zcode 传 { userRoot: ~/.zcode, pluginRoot: ~/.zcode/cli }。
-function collectAll({ userRoot, pluginRoot }, followSymlinks) {
-  return [
+function collectAll({ userRoot, pluginRoot, includeMarketplaces = false }, followSymlinks) {
+  const out = [
     ...collectUserMarkdown(userRoot, followSymlinks),
     ...collectPluginMarkdown(pluginRoot, followSymlinks),
-    ...collectMarketplaces(pluginRoot, followSymlinks),
-    ...collectMetadata(pluginRoot),
+    ...collectMetadata(pluginRoot, includeMarketplaces),
   ];
+  if (includeMarketplaces) out.push(...collectMarketplaces(pluginRoot, followSymlinks));
+  return out;
 }
 
 module.exports = {

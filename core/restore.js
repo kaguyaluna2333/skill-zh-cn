@@ -48,7 +48,8 @@ function main() {
   if (!userRoot || !pluginRoot) { console.error("restore: 缺少 --user-root/--plugin-root 或 --root 或 --all"); process.exit(0); }
 
   // 总是跟随符号链接：清理操作应彻底，还原所有含标记的文件
-  const files = collect.collectAll({ userRoot, pluginRoot }, true);
+  // restore 总是全扫（includeMarketplaces=true）：清理任何已汉化文件，含源码里曾有标记的
+  const files = collect.collectAll({ userRoot, pluginRoot, includeMarketplaces: true }, true);
 
   let restored = 0;
   let skipped = 0;

@@ -16,7 +16,7 @@ const cache = require("./lib/cache");
 const { cjkRatio, CJK_RATIO_THRESHOLD } = require("./lib/cjk");
 
 function parseArgs(argv) {
-  const a = { userRoot: "", pluginRoot: "", root: "", cache: "", output: "", print: false, limit: 0 };
+  const a = { userRoot: "", pluginRoot: "", root: "", cache: "", output: "", print: false, limit: 0, includeMarketplaces: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--user-root") a.userRoot = argv[++i];
@@ -25,6 +25,7 @@ function parseArgs(argv) {
     else if (k === "--cache") a.cache = argv[++i];
     else if (k === "--output") a.output = argv[++i];
     else if (k === "--print") a.print = true;
+    else if (k === "--include-marketplaces") a.includeMarketplaces = true;
     else if (k === "--limit") a.limit = Number.parseInt(argv[++i], 10) || 0;
   }
   return a;
@@ -54,7 +55,7 @@ function main() {
   const cacheData = args.cache ? cache.load(args.cache) : { entries: {} };
   // 默认不跟随符号链接：避免改写符号链接指向的外部源仓库
   const follow = process.env.SKILL_I18N_FOLLOW_SYMLINKS === "1";
-  const files = collect.collectAll({ userRoot, pluginRoot }, follow);
+  const files = collect.collectAll({ userRoot, pluginRoot, includeMarketplaces: args.includeMarketplaces }, follow);
   const mdFiles = files.filter((f) => f.kind !== "metadata");
   const jsonFiles = files.filter((f) => f.kind === "metadata");
 

@@ -75,7 +75,7 @@ node "$SCRIPT_DIR/scan.js" \
     --plugin-root "$PLUGIN_ROOT" \
     --cache "$CACHE_FILE" \
     --output "$QUEUE_FILE" \
-    --print ${SKILL_I18N_LIMIT:+--limit "$SKILL_I18N_LIMIT"} || true
+    --print ${SKILL_I18N_LIMIT:+--limit "$SKILL_I18N_LIMIT"} ${SKILL_I18N_INCLUDE_MARKETPLACES:+--include-marketplaces} || true
 
 # dry-run：只看队列，不翻译不写回
 if [ "$DRY_RUN" = "1" ]; then
