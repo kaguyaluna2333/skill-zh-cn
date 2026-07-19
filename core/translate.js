@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // core/translate.js — 读队列 + 缓存，调翻译 provider，写缓存，输出应用清单。
 //
-// provider 按 API 协议格式分类（非厂商）：
-//   claude     —— 调 claude CLI（默认，零配置）
-//   openai     —— OpenAI chat/completions 兼容协议（OpenAI、DeepSeek、Moonshot 等）
-//   anthropic  —— Anthropic messages 兼容协议（Anthropic 官方及任何 Anthropic 兼容端点）
-// 提供 Anthropic 兼容端点的服务，用 --provider anthropic + 对应 base-url + key。
+// provider 按来源分类：
+//   stdin      —— 译文由本宿主 agent 翻译后从 stdin pipe 进来（{id: zh}）
+//                 「装在谁就让谁的 agent 翻」：hook scan 出队列，agent 用自身 LLM 翻译
+//                 后 pipe；不依赖任何外部 CLI/API（claude/openai/anthropic 仍可用作可选）
+//   claude     —— 调 claude CLI（CC 宿主可用）
+//   openai     —— OpenAI chat/completions 兼容协议
+//   anthropic  —— Anthropic messages 兼容协议
 //
 // env 前缀 SKILL_I18N_*（独立于 claude-code-zh-cn 的 ZH_CN_SKILL_I18N_*，避免同装冲突）。
 
@@ -18,8 +20,7 @@ const { URL } = require("url");
 const { spawn } = require("child_process");
 const cache = require("./lib/cache");
 
-// 翻译子进程 spawn claude 时的 env guard：用专用 HOOK 变量防递归（translate spawn 的
-// claude 子进程不再触发同一个 SessionStart hook）。hook 入口见 SKILL_I18N_HOOK=1 即跳过。
+// 翻译子进程 spawn claude 时的 env guard：用专用 HOOK 变量防递归。
 const SPAWN_GUARD_ENV = { SKILL_I18N_HOOK: "1" };
 
 const SYS_PROMPT = `You are a professional translator. Translate English skill/command descriptions for a developer tool's slash-command menu into Simplified Chinese.
@@ -48,7 +49,7 @@ function stripFence(s) {
   return s.replace(/^\s*```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
 }
 
-// 宽松解析 LLM 输出为 JSON 对象：先 stripFence；失败则提取首个 { 到末个 } 的子串再 parse
+// 宽松解析 LLM 输出为 JSON 对象
 function parseJsonObjectLoose(raw) {
   const s = stripFence(raw);
   try { return JSON.parse(s); } catch {}
@@ -66,7 +67,7 @@ function buildInputs(entries) {
   return inputs;
 }
 
-// 占位符校验：en 与 zh 的 ${...} 出现次数与内容必须一致，否则译文可能丢失占位符
+// 占位符校验：en 与 zh 的 ${...} 出现次数与内容必须一致
 function placeholders(s) {
   const re = /\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9]+/g;
   const m = String(s).match(re);
@@ -104,13 +105,20 @@ function httpJsonRequest(urlStr, { headers, body, timeoutMs = 60000 }) {
   });
 }
 
-// claude CLI provider（默认，零配置）
+// stdin provider：译文由本宿主 agent 翻译后从 stdin pipe 进来（{id: zh}）。
+// 这是「装在谁就让谁的 agent 翻」的落点——不 spawn 任何外部 CLI、不调 API。
+function translateStdin() {
+  const data = fs.readFileSync(0, "utf8");
+  try { return JSON.parse(data); }
+  catch { throw new Error("stdin 译文无法解析为 JSON（期望 {id: zh}）"); }
+}
+
+// claude CLI provider
 function translateClaude(entries) {
   return new Promise((resolve, reject) => {
     const prompt = `${SYS_PROMPT}\n\nInputs:\n${JSON.stringify(buildInputs(entries), null, 2)}`;
     const child = spawn("claude", ["--bare", "-p", prompt, "--output-format", "text"], {
       stdio: ["ignore", "pipe", "pipe"],
-      // 防递归：翻译子进程不再触发同一个 SessionStart hook
       env: { ...process.env, ...SPAWN_GUARD_ENV },
     });
     let out = "";
@@ -150,7 +158,7 @@ async function translateOpenAI(entries, args, apiKey) {
   return parsed;
 }
 
-// Anthropic messages 兼容协议（任何 Anthropic 兼容端点用此 + 对应 base-url）
+// Anthropic messages 兼容协议
 async function translateAnthropic(entries, args, apiKey) {
   if (!apiKey) throw new Error("anthropic provider 需要 SKILL_I18N_API_KEY");
   if (!args.model) throw new Error("anthropic provider 需要 --model / SKILL_I18N_MODEL");
@@ -176,10 +184,11 @@ async function translateAnthropic(entries, args, apiKey) {
 
 function resolveProvider(args) {
   const p = (args.provider || "auto").toLowerCase();
+  if (p === "stdin") return "stdin";
   if (p === "openai") return "openai";
   if (p === "anthropic") return "anthropic";
   if (p === "claude") return "claude";
-  return "claude"; // auto 默认 claude CLI（零配置）
+  return "claude"; // auto 默认 claude CLI；本宿主 agent 翻译用 --provider stdin
 }
 
 async function main() {
@@ -205,28 +214,33 @@ async function main() {
 
   const toDo = queue.toTranslate || [];
   const translations = {};
-  const BATCH = 30;
-  for (let i = 0; i < toDo.length; i += BATCH) {
-    const batch = toDo.slice(i, i + BATCH);
-    try {
-      let map;
-      if (provider === "openai") map = await translateOpenAI(batch, args, apiKey);
-      else if (provider === "anthropic") map = await translateAnthropic(batch, args, apiKey);
-      else map = await translateClaude(batch);
-      Object.assign(translations, map);
-    } catch (e) {
-      console.error(`[translate] 批次失败 (${provider}): ${e.message}，降级小批次重试`);
-      const SUB = 5;
-      for (let j = 0; j < batch.length; j += SUB) {
-        const sub = batch.slice(j, j + SUB);
-        try {
-          let m;
-          if (provider === "openai") m = await translateOpenAI(sub, args, apiKey);
-          else if (provider === "anthropic") m = await translateAnthropic(sub, args, apiKey);
-          else m = await translateClaude(sub);
-          Object.assign(translations, m);
-        } catch (e2) {
-          console.error(`[translate] 小批次重试仍失败，跳过 ${sub.length} 条`);
+  if (provider === "stdin") {
+    // 本宿主 agent 翻译：stdin 是 {id: zh}，一次全读，不分批
+    Object.assign(translations, await translateStdin());
+  } else {
+    const BATCH = 30;
+    for (let i = 0; i < toDo.length; i += BATCH) {
+      const batch = toDo.slice(i, i + BATCH);
+      try {
+        let map;
+        if (provider === "openai") map = await translateOpenAI(batch, args, apiKey);
+        else if (provider === "anthropic") map = await translateAnthropic(batch, args, apiKey);
+        else map = await translateClaude(batch);
+        Object.assign(translations, map);
+      } catch (e) {
+        console.error(`[translate] 批次失败 (${provider}): ${e.message}，降级小批次重试`);
+        const SUB = 5;
+        for (let j = 0; j < batch.length; j += SUB) {
+          const sub = batch.slice(j, j + SUB);
+          try {
+            let m;
+            if (provider === "openai") m = await translateOpenAI(sub, args, apiKey);
+            else if (provider === "anthropic") m = await translateAnthropic(sub, args, apiKey);
+            else m = await translateClaude(sub);
+            Object.assign(translations, m);
+          } catch (e2) {
+            console.error(`[translate] 小批次重试仍失败，跳过 ${sub.length} 条`);
+          }
         }
       }
     }
@@ -262,4 +276,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { translateClaude, translateOpenAI, translateAnthropic, resolveProvider, parseJsonObjectLoose, placeholdersMatch, SPAWN_GUARD_ENV };
+module.exports = { translateStdin, translateClaude, translateOpenAI, translateAnthropic, resolveProvider, parseJsonObjectLoose, placeholdersMatch, SPAWN_GUARD_ENV };

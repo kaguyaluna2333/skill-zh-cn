@@ -192,6 +192,7 @@ function collectAll({ userRoot, pluginRoot }, followSymlinks) {
 - **env 前缀 `SKILL_I18N_*`**（去 `ZH_CN_`），避免与上游 `ZH_CN_SKILL_I18N_*` 冲突导致重复汉化
 - **插件名 `skill-zh-cn`**：与项目目录一致；当前只做中文
 - **发布渠道**：CC/zcode 新建**独立 marketplace**（仓库根 `.claude-plugin/marketplace.json` 自包含，不碰 claude-code-zh-cn）；opencode/codex **v1 git clone + symlink**，**v1.1 发 npm**
+- **翻译引擎：本宿主 agent**（v0.1 修订，回应"装在谁身上让谁的 agent 翻"）：SessionStart hook scan 出待译队列，队列非空时 `additionalContext` 提示 agent；`/skill-zh-cn` command 由**本宿主 agent 用自身 LLM 翻译**（`translate.js provider=stdin`，agent 翻译后 pipe `{id:zh}` 进来），不 spawn 外部 CLI、不调 API——没装别的工具也能翻。translate.js 的 claude/openai/anthropic provider 保留作 CLI 手动模式可选。
 
 ## Resolved（原 Open Questions）
 
