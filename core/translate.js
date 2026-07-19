@@ -183,12 +183,12 @@ async function translateAnthropic(entries, args, apiKey) {
 }
 
 function resolveProvider(args) {
-  const p = (args.provider || "auto").toLowerCase();
+  const p = (args.provider || "").toLowerCase();
   if (p === "stdin") return "stdin";
   if (p === "openai") return "openai";
   if (p === "anthropic") return "anthropic";
   if (p === "claude") return "claude";
-  return "claude"; // auto 默认 claude CLI；本宿主 agent 翻译用 --provider stdin
+  return null; // 未指定（含旧 auto）不再默认 claude——spawn 完整 CC 子进程慢且依赖 CC 装
 }
 
 async function main() {
@@ -205,6 +205,11 @@ async function main() {
   const queue = JSON.parse(fs.readFileSync(args.queue, "utf8"));
   const cacheData = args.cache ? cache.load(args.cache) : { entries: {} };
   const provider = resolveProvider(args);
+  if (!provider) {
+    console.error("[translate] 未指定 provider。推荐由本宿主 agent 翻译（agent-translate.sh / /skill-zh-cn，provider=stdin，零外部依赖）；CLI 手动需显式 --provider claude|openai|anthropic。");
+    fs.writeFileSync(args.output, "[]");
+    return;
+  }
   const apiKey = process.env.SKILL_I18N_API_KEY || "";
 
   const applyList = [];

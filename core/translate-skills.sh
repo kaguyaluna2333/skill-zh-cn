@@ -16,7 +16,7 @@ CACHE_DIR="${SKILL_I18N_CACHE_DIR:-$HOME/.claude/.skill-i18n-cache}"
 USER_ROOT="${SKILL_I18N_USER_ROOT:-${SKILL_I18N_ROOT:-}}"
 PLUGIN_ROOT="${SKILL_I18N_PLUGIN_ROOT:-${SKILL_I18N_ROOT:-}}"
 DRY_RUN=0
-PROVIDER="${SKILL_I18N_PROVIDER:-auto}"
+PROVIDER="${SKILL_I18N_PROVIDER:-}"  # 不默认 auto；未指定则 translate 报错，引导用 agent-translate.sh（agent 翻译）
 HOST=""
 
 while [ "$#" -gt 0 ]; do
