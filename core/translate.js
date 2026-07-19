@@ -14,11 +14,11 @@
 "use strict";
 
 const fs = require("fs");
-const https = require("https");
-const http = require("http");
-const { URL } = require("url");
 const { spawn } = require("child_process");
 const cache = require("./lib/cache");
+// HTTP 用全局 fetch（Node 18+）：对 string body 自动设 Content-Length。
+// ❌ 不要换回 http.request——它不设 Content-Length 会走 chunked encoding，
+//    被 MiniMax 等服务端/代理接受后永不返回响应（实测 14 分钟无响应）。
 
 // 翻译子进程 spawn claude 时的 env guard：用专用 HOOK 变量防递归。
 const SPAWN_GUARD_ENV = { SKILL_I18N_HOOK: "1" };
@@ -87,30 +87,27 @@ function placeholdersMatch(en, zh) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-// 通用 JSON HTTP 请求（零依赖，node 内置 https/http）
+// 通用 JSON HTTP 请求（Node 18+ 全局 fetch）。
+// fetch 对 string body 自动设 Content-Length（非 chunked），http.request 不设会被
+// MiniMax 等服务端/代理卡住不返回——这是历史上翻译卡死的真根因。
 function httpJsonRequest(urlStr, { headers, body, timeoutMs }) {
   const ms = timeoutMs || Number.parseInt(process.env.SKILL_I18N_REQUEST_TIMEOUT || "180000", 10) || 180000;
-  return new Promise((resolve, reject) => {
-    const u = new URL(urlStr);
-    const lib = u.protocol === "https:" ? https : http;
-    const req = lib.request({
-      hostname: u.hostname,
-      port: u.port || (u.protocol === "https:" ? 443 : 80),
-      path: u.pathname + u.search,
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(headers || {}) },
-    }, (res) => {
-      let data = "";
-      res.on("data", (d) => { data += d; });
-      res.on("end", () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(data);
-        else reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
-      });
-    });
-    req.on("error", reject);
-    req.setTimeout(ms, () => req.destroy(new Error("请求超时")));
-    if (body) req.write(body);
-    req.end();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(urlStr, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(headers || {}) },
+    body: body || undefined,
+    signal: controller.signal,
+  }).then(async (resp) => {
+    const data = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${data.slice(0, 200)}`);
+    return data;
+  }).catch((e) => {
+    if (e.name === "AbortError") throw new Error("请求超时");
+    throw e;
+  }).finally(() => {
+    clearTimeout(timer);
   });
 }
 
