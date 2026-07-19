@@ -1,0 +1,19 @@
+{
+  "name": "skill-zh-cn",
+  "owner": {
+    "name": "kaguyaluna2333"
+  },
+  "description": "跨宿主 skill 说明汉化插件 marketplace",
+  "plugins": [
+    {
+      "name": "skill-zh-cn",
+      "source": "./",
+      "description": "跨宿主（Claude Code / zcode / opencode / codex）skill 与命令说明自动汉化",
+      "homepage": "https://github.com/kaguyaluna2333/skill-zh-cn",
+      "repository": "https://github.com/kaguyaluna2333/skill-zh-cn",
+      "license": "MIT",
+      "category": "development",
+      "tags": ["localization", "chinese", "skill", "i18n", "zcode", "codex", "opencode"]
+    }
+  ]
+}
