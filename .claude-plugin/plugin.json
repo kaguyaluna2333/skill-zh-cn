@@ -1,0 +1,15 @@
+{
+  "name": "skill-zh-cn",
+  "displayName": "Skill 说明汉化",
+  "version": "0.1.0",
+  "description": "跨宿主（Claude Code / zcode / opencode / codex）的 skill 与命令说明自动汉化",
+  "author": {
+    "name": "kaguyaluna2333"
+  },
+  "homepage": "https://github.com/kaguyaluna2333/skill-zh-cn",
+  "repository": "https://github.com/kaguyaluna2333/skill-zh-cn",
+  "license": "MIT",
+  "keywords": ["localization", "chinese", "skill", "i18n", "zcode", "codex", "opencode"],
+  "defaultEnabled": true,
+  "hooks": "./hooks/hooks.json"
+}

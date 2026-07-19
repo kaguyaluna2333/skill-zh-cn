@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# hooks/session-start — skill-zh-cn 的 SessionStart hook（CC + zcode 通用）。
+#
+# 后台异步调 core/translate-skills.sh 汉化本宿主的 skill/命令说明。
+# core 据 CLAUDE_PLUGIN_ROOT 自动探测装在 CC 还是 zcode（见 lib/hosts.js 反推）。
+#
+# 默认禁用：SKILL_I18N_ENABLE=1 才启用（不消耗 token/额度）。
+# 防递归：SKILL_I18N_HOOK=1 跳过（翻译 spawn 的 claude 子进程不再触发本 hook）。
+
+set -uo pipefail
+
+# plugin 根：CC 安装时设 CLAUDE_PLUGIN_ROOT；开发/兜底用 hook 自身位置推（hooks/ → 上两级）
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+CORE_SH="$PLUGIN_ROOT/core/translate-skills.sh"
+
+# 后台异步汉化（subshell 作新进程组 leader，kill -- -PID 杀整组，25s 超时真能停）
+if [ "${SKILL_I18N_ENABLE:-0}" = "1" ] && [ "${SKILL_I18N_HOOK:-0}" != "1" ] && [ -x "$CORE_SH" ]; then
+    (
+        SKILL_I18N_HOOK=1 \
+        CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" \
+        bash "$CORE_SH" >/dev/null 2>&1
+    ) &
+    PID=$!
+    ( sleep "${SKILL_I18N_TIMEOUT:-25}"; kill -- -"$PID" 2>/dev/null || true ) &
+    disown "$PID" 2>/dev/null || true
+fi
+
+# SessionStart hook 协议：读 stdin（CC 传入的 JSON），输出合法 JSON。
+# 本插件只做后台汉化，不注入会话上下文（输出空对象）。
+read -r INPUT 2>/dev/null || true
+echo '{}'

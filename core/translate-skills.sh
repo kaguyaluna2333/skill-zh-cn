@@ -46,7 +46,21 @@ if [ -n "$HOST" ]; then
     fi
 fi
 
-# 默认根：未给且无 --host 时，CC 式 ~/.claude 兜底
+# 无 --host 且无显式根：hosts 自动探测（hook 场景靠 CLAUDE_PLUGIN_ROOT 反推 CC/zcode）
+if [ -z "$HOST" ] && [ -z "$USER_ROOT" ] && [ -z "$PLUGIN_ROOT" ]; then
+    resolved=$(node -e '
+        const h = require(process.argv[1]).resolve({});
+        process.stdout.write(h.userRoot + "\t" + h.pluginRoot + "\t" + h.cacheDir);
+    ' "$SCRIPT_DIR/lib/hosts" 2>/dev/null) || true
+    if [ -n "$resolved" ]; then
+        USER_ROOT="${resolved%%$'\t'*}"
+        rest="${resolved#*$'\t'}"
+        PLUGIN_ROOT="${rest%%$'\t'*}"
+        CACHE_DIR="${rest#*$'\t'*}"
+    fi
+fi
+
+# 最终兜底：探测失败 → CC 式 ~/.claude
 if [ -z "$USER_ROOT" ]; then USER_ROOT="$HOME/.claude"; fi
 if [ -z "$PLUGIN_ROOT" ]; then PLUGIN_ROOT="$HOME/.claude"; fi
 
