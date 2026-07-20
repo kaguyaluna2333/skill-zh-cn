@@ -57,14 +57,35 @@ function stripThink(s) {
   return String(s).replace(/<(think|thinking|reasoning|reflection|analysis)>[\s\S]*?<\/\1>/gi, "");
 }
 
-// 宽松解析 LLM 输出为 JSON 对象：先剥 think → 剥 fence → 直接 parse；失败取首 { 到末 }
+// 宽松解析 LLM 输出为 JSON 对象：先剥 think → 剥 fence → 直接 parse；
+// 失败则平衡匹配首个完整 { ... } 对（字符串内 {} 不计），parse 失败递归找下一个。
+// 平衡匹配避免 think 残留的 {fake} 把"首 { 到末 }"范围撑太大（Bug 4）。
 function parseJsonObjectLoose(raw) {
   const s = stripFence(stripThink(raw));
   try { return JSON.parse(s); } catch {}
+  return findFirstJsonObject(s);
+}
+
+// 平衡匹配首个完整 {} 对；字符串内的 {} 不计入深度。首个 {} 对 parse 失败则递归找下一个。
+function findFirstJsonObject(s) {
   const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(s.slice(start, end + 1)); } catch {}
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(s.slice(start, i + 1)); } catch {}
+        return findFirstJsonObject(s.slice(i + 1)); // 首个 {} 对无效 JSON，找下一个
+      }
+    }
   }
   return null;
 }
@@ -241,7 +262,7 @@ async function main() {
         Object.assign(translations, map);
       } catch (e) {
         console.error(`[translate] 批次失败 (${provider}): ${e.message}，降级小批次重试`);
-        const SUB = 5;
+        const SUB = Number.parseInt(process.env.SKILL_I18N_SUB || "1", 10) || 1; // 最终兜底单条（推理 API 小批仍失败时）
         for (let j = 0; j < batch.length; j += SUB) {
           const sub = batch.slice(j, j + SUB);
           try {
