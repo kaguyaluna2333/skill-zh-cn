@@ -73,12 +73,18 @@ opencode / codex 的**自动触发**（可选）：见 [`adapters/opencode/`](ad
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SKILL_I18N_ENABLE` | `0` | `1` 才启用 plugin hook |
-| `SKILL_I18N_PROVIDER` | `auto` | `auto` / `claude` / `openai` / `anthropic` |
+| `SKILL_I18N_PROVIDER` | （空） | `stdin`（本宿主 agent，推荐）/ `claude` / `openai` / `anthropic`；不指定则报错引导 |
 | `SKILL_I18N_API_KEY` | 空 | openai/anthropic 的 key（经 env 传递，不进进程列表）|
 | `SKILL_I18N_BASE_URL` | provider 默认 | 兼容端点 |
 | `SKILL_I18N_MODEL` | 空 | openai/anthropic 模型名 |
+| `SKILL_I18N_BATCH` | `10` | API 批量翻译每批条数（推理型 API 建议 `3`）|
+| `SKILL_I18N_SUB` | `1` | 小批次重试最终兜底（单条）|
+| `SKILL_I18N_REQUEST_TIMEOUT` | `180000` | API 单次请求超时 ms |
 | `SKILL_I18N_TIMEOUT` | `25` | hook 后台超时秒 |
 | `SKILL_I18N_USER_ROOT` / `SKILL_I18N_PLUGIN_ROOT` | 自动探测 | 显式覆盖扫描根 |
+| `SKILL_I18N_INCLUDE_MARKETPLACES` | `0` | `1` 连 marketplaces 源码一起扫（默认只扫 cache+user）|
+
+**推理型 API（MiniMax M 系列、GLM、DeepSeek-R1）推荐**：`SKILL_I18N_BATCH=3`（小批，单次响应快）+ `SKILL_I18N_REQUEST_TIMEOUT=60000`。这类模型带 reasoning 思考，大批量或短超时易失败；agent 翻译（`/skill-zh-cn`，`provider=stdin`）则不受影响。
 
 ## CLI 用法
 
