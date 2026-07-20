@@ -50,8 +50,12 @@ function walkAndCollect(dir, followSymlinks, out, visitedRealpaths) {
     const full = path.join(dir, e.name);
     if (isDirEntry(e, full, followSymlinks)) {
       if (e.name === "commands") {
-        collectCommandsDeep(full, followSymlinks, out, visitedRealpaths);
+        collectCommandsDeep(full, followSymlinks, out, visitedRealpaths, "command");
         continue; // 已收集，不再 walk（避免重复 + 深层 command 漏扫）
+      }
+      if (e.name === "agents") {
+        collectCommandsDeep(full, followSymlinks, out, visitedRealpaths, "agent");
+        continue;
       }
       walkAndCollect(full, followSymlinks, out, visitedRealpaths);
     } else if (e.isFile() && e.name === "SKILL.md") {
@@ -62,7 +66,7 @@ function walkAndCollect(dir, followSymlinks, out, visitedRealpaths) {
 
 // 递归收集 commands 目录下所有 .md（含嵌套子目录），作为 command。
 // 应用 EXCLUDE_SEGS（与 walkAndCollect 一致），并在进入目录时 realpath + visitedRealpaths 防符号链接成环。
-function collectCommandsDeep(dir, followSymlinks, out, visitedRealpaths) {
+function collectCommandsDeep(dir, followSymlinks, out, visitedRealpaths, kind = "command") {
   let realDir;
   try { realDir = fs.realpathSync(dir); } catch { return; }
   if (visitedRealpaths.has(realDir)) return; // 已访问（防环）
@@ -71,9 +75,9 @@ function collectCommandsDeep(dir, followSymlinks, out, visitedRealpaths) {
     if (EXCLUDE_SEGS.has(e.name)) continue;
     const full = path.join(dir, e.name);
     if (isFileEntry(e, full, followSymlinks) && e.name.endsWith(".md")) {
-      out.push({ path: full, kind: "command" });
+      out.push({ path: full, kind }); // command / agent（都是目录下的 .md）
     } else if (isDirEntry(e, full, followSymlinks)) {
-      collectCommandsDeep(full, followSymlinks, out, visitedRealpaths);
+      collectCommandsDeep(full, followSymlinks, out, visitedRealpaths, kind);
     }
   }
 }
@@ -84,9 +88,11 @@ function collectFromRoots(roots, followSymlinks) {
   const visitedRealpaths = new Set();
   for (const r of roots) {
     if (!exists(r)) continue;
-    // 根目录本身是 commands 时，直接深收集其下 .md（否则 walkAndCollect 只认子目录名为 commands）
+    // 根目录本身是 commands / agents 时，直接深收集其下 .md
     if (path.basename(r) === "commands") {
-      collectCommandsDeep(r, followSymlinks, out, visitedRealpaths);
+      collectCommandsDeep(r, followSymlinks, out, visitedRealpaths, "command");
+    } else if (path.basename(r) === "agents") {
+      collectCommandsDeep(r, followSymlinks, out, visitedRealpaths, "agent");
     } else {
       walkAndCollect(r, followSymlinks, out, visitedRealpaths);
     }
@@ -94,13 +100,15 @@ function collectFromRoots(roots, followSymlinks) {
   return out;
 }
 
-// 用户级：userRoot/skills, userRoot/commands（及 .claude/skills|commands，兼容项目级）
+// 用户级：userRoot/skills, userRoot/commands, userRoot/agents（及 .claude/ 下同，兼容项目级）
 function collectUserMarkdown(userRoot, followSymlinks) {
   return collectFromRoots([
     path.join(userRoot, "skills"),
     path.join(userRoot, "commands"),
+    path.join(userRoot, "agents"),
     path.join(userRoot, ".claude", "skills"),
     path.join(userRoot, ".claude", "commands"),
+    path.join(userRoot, ".claude", "agents"),
   ], followSymlinks);
 }
 

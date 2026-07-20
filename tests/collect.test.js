@@ -46,6 +46,16 @@ test("collectAll 收集 command", () => {
   assert.ok(cmds[0].path.endsWith("commands/c.md"));
 });
 
+test("collectAll 收集 agents（agents/ 下 .md，kind=agent）", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "collect-agents-"));
+  fs.mkdirSync(path.join(root, "agents", "sub"), { recursive: true });
+  fs.writeFileSync(path.join(root, "agents", "my-agent.md"), "---\nname: my-agent\ndescription: x\n---\n");
+  fs.writeFileSync(path.join(root, "agents", "sub", "nested.md"), "---\nname: nested\ndescription: y\n---\n");
+  const agents = collectAllSingle(root, false).filter((f) => f.kind === "agent");
+  assert.equal(agents.length, 2);
+  assert.ok(agents.some((a) => a.path.endsWith("agents/my-agent.md")));
+});
+
 // ---------- 双根（zcode 式：userRoot ≠ pluginRoot）----------
 
 test("双根（zcode 式）：userRoot 的 skills + pluginRoot 的 plugin cache 都扫到", () => {
