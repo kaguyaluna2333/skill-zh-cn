@@ -62,7 +62,7 @@ opencode / codex 的**自动触发**（可选）：见 [`adapters/opencode/`](ad
 
 三阶段流水线 **scan → translate → apply**：
 
-- **scan**：递归找 `SKILL.md` / `commands/*.md` / 插件元数据 JSON，解析 `description`，跳过已汉化（有标记）与原生中文（CJK 比例），对比缓存只列新增/改动项。**默认只扫 plugin cache（运行副本）+ user**，不扫 `plugins/marketplaces`（那是插件 git 源码仓库，汉化会 dirty 且运行时不读）；`SKILL_I18N_INCLUDE_MARKETPLACES=1` 或 `--include-marketplaces` 可全扫。`restore` 总是全扫以彻底清理。
+- **scan**：递归找 `SKILL.md` / `commands/*.md` / `agents/*.md`（含插件子智能体，如 ECC 的 67 个）/ 插件元数据 JSON，解析 `description`，跳过已汉化（有标记）与原生中文（CJK 比例），对比缓存只列新增/改动项。**默认只扫 plugin cache（运行副本）+ user**，不扫 `plugins/marketplaces`（那是插件 git 源码仓库，汉化会 dirty 且运行时不读）；`SKILL_I18N_INCLUDE_MARKETPLACES=1` 或 `--include-marketplaces` 可全扫。`restore` 总是全扫以彻底清理。
 - **translate**：调 LLM（`claude` CLI / OpenAI 兼容 / Anthropic 兼容），按英文原文 hash 缓存（插件 update 覆盖后下次启动自动重应用，不重复调 LLM）
 - **apply**：**行级 patch** 写回——只改 `description` 行 + 追加 `description_en` 备份与 `x-zh-cn-translated` 标记，正文逐字节不变；写前 `verifyRewriteSafe` 自检
 

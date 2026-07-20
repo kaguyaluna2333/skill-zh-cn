@@ -15,6 +15,7 @@
 - [x] **T9** README + adapters/opencode|codex 可粘贴示例
 - [x] **T10** LICENSE（MIT）
 - [x] **T11** 翻译引擎改本宿主 agent（hook scan + `/skill-zh-cn` command + `provider=stdin`）
+- [x] **T12** collect 扫描 agents（插件子智能体 ECC 等 + user agents，md frontmatter）
 
 测试 26/26 绿；隔离环境全流程验证（中文 description + description_en 备份 + 标记 + 正文不变、再 scan 跳过、restore 还原）。
 
