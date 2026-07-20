@@ -77,6 +77,61 @@ function serialize(obj) {
   return JSON.stringify(obj, null, 2) + "\n";
 }
 
+// 行级 patch JSON 文本：替换 description 值 + 插入/更新 _description_en + _zh_cn_translated，
+// 保持其余字节（数组单行/多行等格式）不变——避免 serialize 把单行数组展开成多行（Bug 3）。
+// items: [{jsonPath, en, zh}]。返回新文本；无需改 / en 定位不到 / 格式无法保持 → null（apply 回退 serialize）。
+function applyToJsonText(text, items) {
+  const lines = text.split(/\r?\n/);
+  const insertions = [];
+  for (const it of items) {
+    if (!it.en || !it.zh) continue;
+    const enPat = jsonStrForRegex(it.en);
+    const re = new RegExp('^(\\s*)"description"\\s*:\\s*"' + enPat + '"(,?)\\s*$');
+    const idx = lines.findIndex((l) => re.test(l));
+    if (idx < 0) continue;
+    const m = re.exec(lines[idx]);
+    const indent = m[1];
+    let nextIsClose = false;
+    for (let i = idx + 1; i < lines.length; i++) {
+      const tl = lines[i].trim();
+      if (!tl) continue;
+      nextIsClose = /^[}\]]/.test(tl);
+      break;
+    }
+    let enIdx = -1, markerIdx = -1;
+    for (let i = idx + 1; i < lines.length; i++) {
+      const tl = lines[i].trim();
+      if (/^[}\]]/.test(tl)) break;
+      if (/^"_description_en"\s*:/.test(tl)) enIdx = i;
+      else if (/^"_zh_cn_translated"\s*:/.test(tl)) markerIdx = i;
+    }
+    insertions.push({ idx, indent, en: it.en, zh: it.zh, nextIsClose, enIdx, markerIdx });
+  }
+  if (insertions.length === 0) return null;
+  insertions.sort((a, b) => b.idx - a.idx); // 从后往前，避免 idx 偏移
+  for (const ins of insertions) {
+    const { idx, indent, en, zh, nextIsClose, enIdx, markerIdx } = ins;
+    lines[idx] = `${indent}"description": "${jsonStrQuote(zh)}",`;
+    const enLine = `${indent}"_description_en": "${jsonStrQuote(en)}",`;
+    const markerLine = `${indent}"_zh_cn_translated": true${nextIsClose ? "" : ","}`;
+    if (enIdx >= 0 && markerIdx >= 0) {
+      lines[enIdx] = enLine;
+      lines[markerIdx] = markerLine;
+    } else {
+      lines.splice(idx + 1, 0, enLine, markerLine);
+    }
+  }
+  const out = lines.join("\n");
+  try { JSON.parse(out); return out; } catch { return null; } // 格式损坏 → null，apply 回退 serialize
+}
+
+function jsonStrQuote(s) { return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"'); }
+// it.en 是实际值；原文里是 JSON 字符串转义形式。先 stringify 拿转义形式，再 regex escape。
+function jsonStrForRegex(s) {
+  const jsonEscaped = JSON.stringify(s).slice(1, -1);
+  return jsonEscaped.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 module.exports = {
   tryParse,
   extractDescriptions,
@@ -84,4 +139,5 @@ module.exports = {
   applyTranslation,
   restoreAll,
   serialize,
+  applyToJsonText,
 };

@@ -74,12 +74,16 @@ function main() {
     const isMeta = items[0].kind === "metadata";
 
     if (isMeta) {
-      const obj = meta.tryParse(readText(file) || "");
+      const originalText = readText(file) || "";
+      const obj = meta.tryParse(originalText);
       if (!obj) { console.error(`[apply] 跳过 ${file}: JSON 解析失败`); skipped += items.length; continue; }
       const toApply = items.filter((it) => it.jsonPath && !meta.isPathTranslated(obj, it.jsonPath));
       if (toApply.length === 0) { skipped += items.length; continue; }
-      for (const it of toApply) meta.applyTranslation(obj, it.jsonPath, it.zh, it.en);
-      const after = meta.serialize(obj);
+      // 行级 patch（保持 JSON 格式，避免数组单行→多行等无意义 diff，Bug 3）；失败回退 serialize
+      const patched = meta.applyToJsonText(originalText, toApply);
+      let after;
+      if (patched !== null) after = patched;
+      else { for (const it of toApply) meta.applyTranslation(obj, it.jsonPath, it.zh, it.en); after = meta.serialize(obj); }
       if (args.dryRun) {
         console.log(`[dry-run] 将写 ${file}（${toApply.length} 项元数据）`);
         continue;
