@@ -17,6 +17,8 @@
   <img src="https://img.shields.io/badge/Codex-412991?style=flat-square&logo=openai&logoColor=white" alt="Codex"/>
   <img src="https://img.shields.io/badge/Node-≥18-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node ≥18"/>
   <img src="https://img.shields.io/badge/零依赖-是-22C55E?style=flat-square" alt="零依赖"/>
+  <a href="https://github.com/kaguyaluna2333/skill-zh-cn/stargazers"><img src="https://img.shields.io/github/stars/kaguyaluna2333/skill-zh-cn?style=flat-square&label=⭐%20stars" alt="Stars"/></a>
+  <a href="https://github.com/kaguyaluna2333/skill-zh-cn/issues"><img src="https://img.shields.io/github/issues/kaguyaluna2333/skill-zh-cn?style=flat-square" alt="Issues"/></a>
 </p>
 
 ---
