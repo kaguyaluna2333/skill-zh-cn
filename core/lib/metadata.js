@@ -83,27 +83,47 @@ function serialize(obj) {
 function applyToJsonText(text, items) {
   const lines = text.split(/\r?\n/);
   const insertions = [];
+  // 撞文修复：同 en 不同 item 必须分到不同行。用 claimed 集合记住已 claim 的行号，
+  // 每个 item 的搜索从上一个匹配位置之后继续，跳过已 claim 的 idx。
+  const claimed = new Set();
+  let searchFrom = 0;
   for (const it of items) {
     if (!it.en || !it.zh) continue;
     const enPat = jsonStrForRegex(it.en);
     const re = new RegExp('^(\\s*)"description"\\s*:\\s*"' + enPat + '"(,?)\\s*$');
-    const idx = lines.findIndex((l) => re.test(l));
+    let idx = -1;
+    for (let i = searchFrom; i < lines.length; i++) {
+      if (claimed.has(i)) continue;
+      if (re.test(lines[i])) { idx = i; break; }
+    }
+    // 回退：items 非文档序时，向前搜索未 claim 的匹配行。
+    if (idx < 0) {
+      for (let i = 0; i < searchFrom; i++) {
+        if (claimed.has(i)) continue;
+        if (re.test(lines[i])) { idx = i; break; }
+      }
+    }
     if (idx < 0) continue;
+    claimed.add(idx);
+    searchFrom = idx + 1;
     const m = re.exec(lines[idx]);
     const indent = m[1];
-    let nextIsClose = false;
-    for (let i = idx + 1; i < lines.length; i++) {
-      const tl = lines[i].trim();
-      if (!tl) continue;
-      nextIsClose = /^[}\]]/.test(tl);
-      break;
-    }
     let enIdx = -1, markerIdx = -1;
     for (let i = idx + 1; i < lines.length; i++) {
       const tl = lines[i].trim();
       if (/^[}\]]/.test(tl)) break;
       if (/^"_description_en"\s*:/.test(tl)) enIdx = i;
       else if (/^"_zh_cn_translated"\s*:/.test(tl)) markerIdx = i;
+    }
+    // markerLine 逗号修复：marker 已存在（更新分支）时，逗号由 markerIdx 的下一非空行决定；
+    // 否则由 description 行的下一非空行决定（marker 将被插到 idx+1，其后即原 idx+1 行）。
+    const closeFromIdx = markerIdx >= 0 ? markerIdx + 1 : idx + 1;
+    let nextIsClose = false;
+    for (let i = closeFromIdx; i < lines.length; i++) {
+      const tl = lines[i].trim();
+      if (!tl) continue;
+      nextIsClose = /^[}\]]/.test(tl);
+      break;
     }
     insertions.push({ idx, indent, en: it.en, zh: it.zh, nextIsClose, enIdx, markerIdx });
   }
@@ -114,12 +134,13 @@ function applyToJsonText(text, items) {
     lines[idx] = `${indent}"description": "${jsonStrQuote(zh)}",`;
     const enLine = `${indent}"_description_en": "${jsonStrQuote(en)}",`;
     const markerLine = `${indent}"_zh_cn_translated": true${nextIsClose ? "" : ","}`;
-    if (enIdx >= 0 && markerIdx >= 0) {
-      lines[enIdx] = enLine;
-      lines[markerIdx] = markerLine;
-    } else {
-      lines.splice(idx + 1, 0, enLine, markerLine);
-    }
+    // 更新分支修复：enIdx 与 markerIdx 独立判断。各自 >=0 则就地更新该行；缺谁插谁（插在 idx+1）。
+    if (enIdx >= 0) lines[enIdx] = enLine;
+    if (markerIdx >= 0) lines[markerIdx] = markerLine;
+    const toInsert = [];
+    if (enIdx < 0) toInsert.push(enLine);
+    if (markerIdx < 0) toInsert.push(markerLine);
+    if (toInsert.length > 0) lines.splice(idx + 1, 0, ...toInsert);
   }
   const out = lines.join("\n");
   try { JSON.parse(out); return out; } catch { return null; } // 格式损坏 → null，apply 回退 serialize

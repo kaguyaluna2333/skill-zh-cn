@@ -13,6 +13,7 @@ const path = require("path");
 const collect = require("./lib/collect");
 const fm = require("./lib/frontmatter");
 const meta = require("./lib/metadata");
+const { safeWrite, readText } = require("./lib/io");
 
 function parseArgs(argv) {
   const a = { userRoot: "", pluginRoot: "", root: "", all: false, dryRun: false };
@@ -26,15 +27,6 @@ function parseArgs(argv) {
   }
   return a;
 }
-
-function safeWrite(file, content) {
-  const tmp = `${file}.zh-cn-tmp.${process.pid}`;
-  fs.writeFileSync(tmp, content);
-  try { fs.chmodSync(tmp, fs.statSync(file).mode); } catch {}
-  try { fs.renameSync(tmp, file); }
-  catch { try { fs.unlinkSync(file); } catch {} fs.renameSync(tmp, file); }
-}
-function readText(p) { try { return fs.readFileSync(p, "utf8"); } catch { return null; } }
 
 function main() {
   const args = parseArgs(process.argv.slice(2));

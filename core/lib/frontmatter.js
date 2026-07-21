@@ -250,7 +250,7 @@ function rewriteDescription(text, { zh, en }) {
 // 无标记或无备份时原样返回。
 function restoreDescription(text) {
   const p = parseFrontmatter(text);
-  if (!p.hasFm || !hasTranslatedMarker(text)) return text;
+  if (!p.hasFm || !hasTranslatedMarker(p)) return text;
   const en = getOriginalEn(text);
   if (en === null) return text;
 

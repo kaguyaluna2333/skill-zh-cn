@@ -13,8 +13,10 @@
 //   skill-zh-cn --dry-run | list         只看待译，不写盘
 //   skill-zh-cn restore [--host X | --root Y | --all]
 //
-// 翻译引擎 env：SKILL_I18N_PROVIDER / API_KEY / BASE_URL / MODEL
-// （provider=auto 默认调 claude CLI；openai/anthropic 需配 key+model）
+// 翻译引擎（三选一，无默认）：
+//   --provider claude|openai|anthropic    CLI 手动路径
+//   SKILL_I18N_PROVIDER / API_KEY / BASE_URL / MODEL
+// 推荐 /skill-zh-cn 命令（agent stdin 翻译，零外部依赖）
 
 "use strict";
 
@@ -35,19 +37,21 @@ function usage() {
   skill-zh-cn --dry-run | list           只列待译，不写盘
   skill-zh-cn restore [--host X|--root Y|--all]
 
-翻译引擎 env：
-  SKILL_I18N_PROVIDER=auto|claude|openai|anthropic
-  SKILL_I18N_API_KEY / SKILL_I18N_BASE_URL / SKILL_I18N_MODEL`);
+翻译引擎（三选一，无默认；不指定则报错引导）：
+  --provider claude|openai|anthropic
+  SKILL_I18N_PROVIDER / SKILL_I18N_API_KEY / SKILL_I18N_BASE_URL / SKILL_I18N_MODEL
+推荐 /skill-zh-cn 命令（由本宿主 agent 翻译，零外部依赖）`);
 }
 
 function parseArgs(argv) {
-  const a = { host: "", root: "", userRoot: "", pluginRoot: "", dryRun: false, command: "", all: false, help: false };
+  const a = { host: "", root: "", userRoot: "", pluginRoot: "", provider: "", dryRun: false, command: "", all: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--host") a.host = argv[++i];
     else if (k === "--root") a.root = argv[++i];
     else if (k === "--user-root") a.userRoot = argv[++i];
     else if (k === "--plugin-root") a.pluginRoot = argv[++i];
+    else if (k === "--provider") a.provider = argv[++i];
     else if (k === "--dry-run") a.dryRun = true;
     else if (k === "list") { a.dryRun = true; }
     else if (k === "restore") a.command = "restore";
@@ -67,6 +71,7 @@ function runTranslate(args) {
   if (args.host) shArgs.push("--host", args.host);
   else if (args.root) shArgs.push("--root", args.root);
   else if (args.userRoot && args.pluginRoot) shArgs.push("--user-root", args.userRoot, "--plugin-root", args.pluginRoot);
+  if (args.provider) shArgs.push("--provider", args.provider);
   if (args.dryRun) shArgs.push("--dry-run");
   spawnInherit("bash", shArgs);
 }

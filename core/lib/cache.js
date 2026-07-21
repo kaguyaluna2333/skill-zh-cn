@@ -29,8 +29,16 @@ const MAX_ENTRIES = 5000;
 function save(cacheFile, data) {
   if (!cacheFile) return;
   try {
-    // 软上限：条目过多时按 ts 升序淘汰最旧，避免缓存无限膨胀拖慢启动
+    // 并发 lost-update 防护：先重新 load 最新文件，把已存在条目与本批 data.entries
+    // 合并（后者覆盖前者同 key）再写，避免并发后写覆盖前写丢条目。
     if (data && data.entries) {
+      const existing = load(cacheFile);
+      if (existing && existing.entries) {
+        for (const k of Object.keys(existing.entries)) {
+          if (!(k in data.entries)) data.entries[k] = existing.entries[k];
+        }
+      }
+      // 软上限：条目过多时按 ts 升序淘汰最旧，避免缓存无限膨胀拖慢启动
       const keys = Object.keys(data.entries);
       if (keys.length > MAX_ENTRIES) {
         keys.sort((a, b) => (data.entries[a].ts || 0) - (data.entries[b].ts || 0));
@@ -39,7 +47,8 @@ function save(cacheFile, data) {
       }
     }
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
-    const tmp = cacheFile + ".tmp";
+    // tmp 名带 process.pid：避免多进程并发竞写同一 tmp 损坏
+    const tmp = `${cacheFile}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     try {
       fs.renameSync(tmp, cacheFile);
@@ -52,8 +61,10 @@ function save(cacheFile, data) {
   }
 }
 
-function lookup(data, en) {
-  const e = data.entries[hashKey(en)];
+function lookup(data, en, precomputedId) {
+  // 调用方已算过 hash 时可传入 precomputedId，避免重复 sha256（scan 的热路径）
+  const key = precomputedId || hashKey(en);
+  const e = data.entries[key];
   return e && e.zh ? e.zh : null;
 }
 

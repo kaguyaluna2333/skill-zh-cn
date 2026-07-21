@@ -14,9 +14,10 @@ const fm = require("./lib/frontmatter");
 const meta = require("./lib/metadata");
 const cache = require("./lib/cache");
 const { cjkRatio, CJK_RATIO_THRESHOLD } = require("./lib/cjk");
+const { readText } = require("./lib/io");
 
 function parseArgs(argv) {
-  const a = { userRoot: "", pluginRoot: "", root: "", cache: "", output: "", print: false, limit: 0, includeMarketplaces: false };
+  const a = { userRoot: "", pluginRoot: "", root: "", cache: "", output: "", print: false, printCount: "", limit: 0, includeMarketplaces: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--user-root") a.userRoot = argv[++i];
@@ -25,17 +26,17 @@ function parseArgs(argv) {
     else if (k === "--cache") a.cache = argv[++i];
     else if (k === "--output") a.output = argv[++i];
     else if (k === "--print") a.print = true;
+    else if (k === "--print-count") a.printCount = argv[++i];
     else if (k === "--include-marketplaces") a.includeMarketplaces = true;
     else if (k === "--limit") a.limit = Number.parseInt(argv[++i], 10) || 0;
   }
   return a;
 }
 
-function readText(p) { try { return fs.readFileSync(p, "utf8"); } catch { return null; } }
-
 function enqueue(toTranslate, cached, cacheData, en, item) {
   const id = cache.hashKey(en);
-  const zh = cache.lookup(cacheData, en);
+  // 复用已算出的 id，避免 lookup 内部再 sha256 一次
+  const zh = cache.lookup(cacheData, en, id);
   if (zh) {
     cached.push({ path: item.path, kind: item.kind, jsonPath: item.jsonPath, en, zh, id });
   } else {
@@ -96,6 +97,14 @@ function main() {
   const result = { userRoot, pluginRoot, toTranslate: toTranslateList, cached, skip };
   fs.mkdirSync(path.dirname(args.output), { recursive: true });
   fs.writeFileSync(args.output, JSON.stringify(result, null, 2));
+
+  // --print-count FILE：把 toTranslate.length 写入 FILE，供 hook 省掉第二次 node 冷启动
+  if (args.printCount) {
+    try {
+      fs.mkdirSync(path.dirname(args.printCount), { recursive: true });
+      fs.writeFileSync(args.printCount, String(result.toTranslate.length));
+    } catch { /* 忽略计数写入失败，hook 侧 cat 失败兜底 0 */ }
+  }
 
   if (args.print) {
     const toFileTotal = result.toTranslate.reduce((n, t) => n + t.items.length, 0);

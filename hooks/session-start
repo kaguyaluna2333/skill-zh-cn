@@ -11,20 +11,34 @@
 
 set -uo pipefail
 
+# 递归 guard：translate.js spawn claude CLI 时设 SKILL_I18N_HOOK=1 防递归；
+# 内层会话若再触发 SessionStart，直接读 stdin 输出空 JSON 短路退出，
+# 与 translate.js 的 SPAWN_GUARD_ENV 闭环。
+if [ "${SKILL_I18N_HOOK:-0}" = "1" ]; then
+    read -r _INPUT 2>/dev/null || true
+    echo '{}'
+    exit 0
+fi
+
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 # hosts 探测本宿主（CC 还是 zcode，由 CLAUDE_PLUGIN_ROOT 反推或特征扫描）
-resolved=$(node -e '
-    const h = require(process.argv[1]).resolve({});
-    process.stdout.write(h.userRoot + "\t" + h.pluginRoot + "\t" + h.cacheDir);
-' "$PLUGIN_ROOT/core/lib/hosts" 2>/dev/null) || resolved=""
-
-USER_ROOT="${resolved%%$'\t'*}"
-rest="${resolved#*$'\t'}"
-PLUGIN_ROOT_HOST="${rest%%$'\t'*}"
-CACHE_DIR="${rest#*$'\t'}"
+# 一行 eval 替代旧 tab 分隔 + 四段字符串切割；探测失败留空变量，下面兜底
+USER_ROOT=""
+PLUGIN_ROOT_HOST=""
+CACHE_DIR=""
+eval "$(node "$PLUGIN_ROOT/core/lib/hosts.js" --shell-eval 2>/dev/null)" || true
+# shell-eval 把「宿主 pluginRoot」写到 PLUGIN_ROOT；本脚本里 PLUGIN_ROOT 专指
+# skill-zh-cn 插件根（下面要拼 $PLUGIN_ROOT/core/scan.js 路径）——把它转存到
+# PLUGIN_ROOT_HOST 后恢复原值
+PLUGIN_ROOT_HOST="${PLUGIN_ROOT:-}"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 # scan 待译项（同步，不调 LLM）
+# 一次 spawn 完成 scan + count：scan.js 的 --print-count 直接把 toTranslate.length
+# 写入文件，省掉第二次 node 冷启动（旧实现先 spawn scan.js 再 spawn node -e 数 count）
+# TODO(perf): 全树扫描无 mtime 缓存——每次 SessionStart 都遍历所有 skill/command 文件
+# 解析 frontmatter。可加 per-path mtime 缓存（路径 → mtime → 跳过解析）减少常驻开销。
 COUNT=0
 if [ -n "$USER_ROOT" ] && [ -n "$PLUGIN_ROOT_HOST" ] && [ -d "$PLUGIN_ROOT/core" ]; then
     mkdir -p "$CACHE_DIR" 2>/dev/null || true
@@ -32,15 +46,9 @@ if [ -n "$USER_ROOT" ] && [ -n "$PLUGIN_ROOT_HOST" ] && [ -d "$PLUGIN_ROOT/core"
         --user-root "$USER_ROOT" \
         --plugin-root "$PLUGIN_ROOT_HOST" \
         --cache "$CACHE_DIR/translations.json" \
-        --output "$CACHE_DIR/.queue.json" >/dev/null 2>&1 || true
-    COUNT=$(node -e '
-        try {
-            const q = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-            process.stdout.write(String((q.toTranslate || []).length));
-        } catch {
-            process.stdout.write("0");
-        }
-    ' "$CACHE_DIR/.queue.json" 2>/dev/null)
+        --output "$CACHE_DIR/.queue.json" \
+        --print-count "$CACHE_DIR/.count" >/dev/null 2>&1 || true
+    COUNT="$(cat "$CACHE_DIR/.count" 2>/dev/null || echo 0)"
 fi
 
 # SessionStart hook 协议：读 stdin

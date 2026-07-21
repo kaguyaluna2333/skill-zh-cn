@@ -10,6 +10,15 @@
 
 set -uo pipefail
 
+# 递归 guard：translate.js spawn claude CLI 时设 SKILL_I18N_HOOK=1 防递归；
+# 若本脚本在 hook 上下文被再次拉起（如 claude --bare 内层会话触发 SessionStart），
+# 直接读 stdin 输出空 JSON 短路退出，让 translate.js 的 SPAWN_GUARD_ENV 真正闭环。
+if [ "${SKILL_I18N_HOOK:-0}" = "1" ]; then
+    read -r _INPUT 2>/dev/null || true
+    echo '{}'
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CACHE_DIR="${SKILL_I18N_CACHE_DIR:-$HOME/.claude/.skill-i18n-cache}"
 # SKILL_I18N_ROOT 作双根相同的快捷（CC 式单根）
@@ -32,32 +41,15 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# --host：调 core/lib/hosts.js 解析该宿主的 userRoot/pluginRoot/cacheDir（覆盖 env 与 --root）
+# --host：调 core/lib/hosts.js --shell-eval 解析该宿主的 userRoot/pluginRoot/cacheDir（覆盖 env 与 --root）
+# 一行 eval 替代旧 tab 分隔 + 四段字符串切割
 if [ -n "$HOST" ]; then
-    resolved=$(node -e '
-        const h = require(process.argv[1]).resolve({ host: process.argv[2] });
-        process.stdout.write(h.userRoot + "\t" + h.pluginRoot + "\t" + h.cacheDir);
-    ' "$SCRIPT_DIR/lib/hosts" "$HOST" 2>/dev/null) || true
-    if [ -n "$resolved" ]; then
-        USER_ROOT="${resolved%%$'\t'*}"
-        rest="${resolved#*$'\t'}"
-        PLUGIN_ROOT="${rest%%$'\t'*}"
-        CACHE_DIR="${rest#*$'\t'*}"
-    fi
+    eval "$(node "$SCRIPT_DIR/lib/hosts.js" --shell-eval --host "$HOST" 2>/dev/null)" || true
 fi
 
 # 无 --host 且无显式根：hosts 自动探测（hook 场景靠 CLAUDE_PLUGIN_ROOT 反推 CC/zcode）
 if [ -z "$HOST" ] && [ -z "$USER_ROOT" ] && [ -z "$PLUGIN_ROOT" ]; then
-    resolved=$(node -e '
-        const h = require(process.argv[1]).resolve({});
-        process.stdout.write(h.userRoot + "\t" + h.pluginRoot + "\t" + h.cacheDir);
-    ' "$SCRIPT_DIR/lib/hosts" 2>/dev/null) || true
-    if [ -n "$resolved" ]; then
-        USER_ROOT="${resolved%%$'\t'*}"
-        rest="${resolved#*$'\t'}"
-        PLUGIN_ROOT="${rest%%$'\t'*}"
-        CACHE_DIR="${rest#*$'\t'*}"
-    fi
+    eval "$(node "$SCRIPT_DIR/lib/hosts.js" --shell-eval 2>/dev/null)" || true
 fi
 
 # 最终兜底：探测失败 → CC 式 ~/.claude

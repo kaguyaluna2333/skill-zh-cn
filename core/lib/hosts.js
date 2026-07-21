@@ -75,6 +75,50 @@ function detectHostByRoots(ur, pr) {
   return null;
 }
 
+// 多宿主特征目录共存时给出候选列表（供 shell-eval WARNING 与诊断用）。
+function detectAll() {
+  return ["cc", "zcode", "opencode", "codex"].filter((n) => HOSTS[n].detect());
+}
+
+// 单引号包裹并转义内部单引号（shell-eval 赋值安全）。
+function shellSingleQuote(s) {
+  return `'${String(s).replace(/'/g, "'\\''")}'`;
+}
+
+// 解析命令行 argv → resolve opts（与 scan.js/translate.js 风格一致）。
+function parseCliArgs(argv) {
+  const opts = { host: null, root: null, userRoot: null, pluginRoot: null };
+  for (let i = 0; i < argv.length; i++) {
+    const k = argv[i];
+    if (k === "--host") opts.host = argv[++i];
+    else if (k === "--root") opts.root = argv[++i];
+    else if (k === "--user-root") opts.userRoot = argv[++i];
+    else if (k === "--plugin-root") opts.pluginRoot = argv[++i];
+  }
+  return opts;
+}
+
+// 输出 shell 可 eval 的赋值语句：USER_ROOT/PLUGIN_ROOT/CACHE_DIR/HOST。
+// 多宿主特征目录共存且未显式指定 host/root 时，顶部加一行 # WARNING 注释，
+// 提示用 --host 显式指定（# 在 shell 里是注释，eval 时被忽略，仅供人读）。
+function emitShellEval(r, opts = {}) {
+  const lines = [];
+  const explicit = opts.host || opts.root || opts.userRoot || opts.pluginRoot;
+  if (!explicit) {
+    const detected = detectAll();
+    if (detected.length > 1) {
+      lines.push(
+        `# WARNING: 检测到多个宿主特征目录共存 (${detected.join(", ")})，未显式指定时按优先序取 ${r.host}。建议用 --host <name> 明确指定。`
+      );
+    }
+  }
+  lines.push(`USER_ROOT=${shellSingleQuote(r.userRoot)};`);
+  lines.push(`PLUGIN_ROOT=${shellSingleQuote(r.pluginRoot)};`);
+  lines.push(`CACHE_DIR=${shellSingleQuote(r.cacheDir)};`);
+  lines.push(`HOST=${shellSingleQuote(r.host || "")};`);
+  return lines.join("\n");
+}
+
 function resolve(opts = {}) {
   const { host, userRoot, pluginRoot, root } = opts;
 
@@ -116,4 +160,16 @@ function resolve(opts = {}) {
   return { host: "cc", userRoot: ccRoot, pluginRoot: ccRoot, cacheDir: cacheDirFor(ccRoot) };
 }
 
-module.exports = { HOSTS, resolve, cacheDirFor, derivePluginRootFromInstall, deriveUserRoot, detectHostByRoots };
+module.exports = { HOSTS, resolve, cacheDirFor, derivePluginRootFromInstall, deriveUserRoot, detectHostByRoots, detectAll, shellSingleQuote, emitShellEval };
+
+// 直接当脚本跑：--shell-eval 输出 shell 可 eval 的赋值（供 bash 脚本 eval 调用，
+// 替代 tab 分隔 + 四段字符串切割）。
+//   node hosts.js --shell-eval [--host X | --root R | --user-root U --plugin-root P]
+if (require.main === module) {
+  const argv = process.argv.slice(2);
+  if (argv.includes("--shell-eval")) {
+    const opts = parseCliArgs(argv);
+    const r = resolve(opts);
+    process.stdout.write(emitShellEval(r, opts) + "\n");
+  }
+}

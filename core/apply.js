@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const fm = require("./lib/frontmatter");
 const meta = require("./lib/metadata");
+const { safeWrite, readText } = require("./lib/io");
 
 function parseArgs(argv) {
   const a = { apply: "", dryRun: false, userRoot: "", pluginRoot: "", root: "" };
@@ -22,16 +23,6 @@ function parseArgs(argv) {
   }
   return a;
 }
-
-function safeWrite(file, content) {
-  const tmp = `${file}.zh-cn-tmp.${process.pid}`;
-  fs.writeFileSync(tmp, content);
-  try { fs.chmodSync(tmp, fs.statSync(file).mode); } catch {} // 保留原文件权限
-  try { fs.renameSync(tmp, file); }
-  catch { try { fs.unlinkSync(file); } catch {} fs.renameSync(tmp, file); }
-}
-
-function readText(p) { try { return fs.readFileSync(p, "utf8"); } catch { return null; } }
 
 // 文件是否落在某个允许的根之下（防清单被篡改越界写）
 function underAnyRoot(file, roots) {
@@ -65,8 +56,10 @@ function main() {
   let applied = 0;
   let skipped = 0;
   for (const [file, items] of byPath) {
-    if (roots.length && !underAnyRoot(file, roots)) {
-      console.error(`[apply] 路径越界，跳过 ${file}`);
+    // fail-closed: roots 为空（未指定任何根）或文件不在任一根下，一律跳过。
+    // 不再因 roots 为空而放开边界——宁可漏写也不越界写。
+    if (!underAnyRoot(file, roots)) {
+      console.error(`[apply] 路径不在允许根下，跳过 ${file}`);
       skipped += items.length;
       continue;
     }

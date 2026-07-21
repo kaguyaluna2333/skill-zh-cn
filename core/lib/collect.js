@@ -58,7 +58,7 @@ function walkAndCollect(dir, followSymlinks, out, visitedRealpaths) {
         continue;
       }
       walkAndCollect(full, followSymlinks, out, visitedRealpaths);
-    } else if (e.isFile() && e.name === "SKILL.md") {
+    } else if (isFileEntry(e, full, followSymlinks) && e.name === "SKILL.md") {
       out.push({ path: full, kind: "skill" });
     }
   }

@@ -58,7 +58,7 @@ function stripThink(s) {
 }
 
 // 宽松解析 LLM 输出为 JSON 对象：先剥 think → 剥 fence → 直接 parse；
-// 失败则平衡匹配首个完整 { ... } 对（字符串内 {} 不计），parse 失败递归找下一个。
+// 失败则平衡匹配首个完整 { ... } 对（字符串内 {} 不计），parse 失败游标推进找下一个。
 // 平衡匹配避免 think 残留的 {fake} 把"首 { 到末 }"范围撑太大（Bug 4）。
 function parseJsonObjectLoose(raw) {
   const s = stripFence(stripThink(raw));
@@ -66,26 +66,32 @@ function parseJsonObjectLoose(raw) {
   return findFirstJsonObject(s);
 }
 
-// 平衡匹配首个完整 {} 对；字符串内的 {} 不计入深度。首个 {} 对 parse 失败则递归找下一个。
+// 平衡匹配首个完整 {} 对；字符串内的 {} 不计入深度。
+// 迭代版：维护 pos 游标，平衡匹配到一对花括号后若 JSON.parse 失败就把 pos 设为
+// 该结束位置 +1 继续 indexOf 左花括号。消除递归与剩余子串 slice，避免对抗性
+// 输出栈溢出与 O(N²) 切片成本。语义不变（左到右扫、跳过字符串内括号、返回首个可 parse 的块）。
 function findFirstJsonObject(s) {
-  const start = s.indexOf("{");
-  if (start < 0) return null;
-  let depth = 0, inStr = false, esc = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        try { return JSON.parse(s.slice(start, i + 1)); } catch {}
-        return findFirstJsonObject(s.slice(i + 1)); // 首个 {} 对无效 JSON，找下一个
+  let pos = 0;
+  while (pos < s.length) {
+    const start = s.indexOf("{", pos);
+    if (start < 0) return null;
+    let depth = 0, inStr = false, esc = false, end = -1;
+    for (let i = start; i < s.length; i++) {
+      const c = s[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) { end = i; break; }
       }
     }
+    if (end < 0) return null; // 未闭合，后续不可能再出现可 parse 块
+    try { return JSON.parse(s.slice(start, end + 1)); } catch {}
+    pos = end + 1; // 首个 {} 对无效 JSON，游标推进到结束位置 +1，继续找下一个 {
   }
   return null;
 }
@@ -122,7 +128,11 @@ function httpJsonRequest(urlStr, { headers, body, timeoutMs }) {
     signal: controller.signal,
   }).then(async (resp) => {
     const data = await resp.text();
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${data.slice(0, 200)}`);
+    if (!resp.ok) {
+      // 默认不外泄响应体（可能含密钥/PII/巨大 HTML）；仅 SKILL_I18N_DEBUG=1 时附 body 片段。
+      const dbg = process.env.SKILL_I18N_DEBUG === "1" ? `: ${data.slice(0, 200)}` : " 请求失败";
+      throw new Error(`HTTP ${resp.status}${dbg}`);
+    }
     return data;
   }).catch((e) => {
     if (e.name === "AbortError") throw new Error("请求超时");
@@ -135,6 +145,9 @@ function httpJsonRequest(urlStr, { headers, body, timeoutMs }) {
 // stdin provider：译文由本宿主 agent 翻译后从 stdin pipe 进来（{id: zh}）。
 // 这是「装在谁就让谁的 agent 翻」的落点——不 spawn 任何外部 CLI、不调 API。
 function translateStdin() {
+  if (process.stdin.isTTY) {
+    throw new Error("stdin provider 需 pipe 译文 JSON,请用 cat file 管道传给 agent-translate.sh");
+  }
   const data = fs.readFileSync(0, "utf8");
   try { return JSON.parse(data); }
   catch { throw new Error("stdin 译文无法解析为 JSON（期望 {id: zh}）"); }
@@ -203,8 +216,15 @@ async function translateAnthropic(entries, args, apiKey) {
     body,
   });
   const data = JSON.parse(resp);
-  const content = (data.content && data.content[0] && data.content[0].text) || "";
-  const parsed = parseJsonObjectLoose(content);
+  // 遍历 content 数组，过滤 type === "text" 的 block 并 join。
+  // Anthropic 响应可能含 thinking / tool_use 等多 block，旧实现只取 [0].text 会漏。
+  if (!Array.isArray(data.content)) throw new Error("anthropic 无 text block");
+  const text = data.content
+    .filter((b) => b && b.type === "text")
+    .map((b) => (typeof b.text === "string" ? b.text : ""))
+    .join("");
+  if (!text) throw new Error("anthropic 无 text block");
+  const parsed = parseJsonObjectLoose(text);
   if (parsed === null) throw new Error("anthropic 返回无法解析为 JSON");
   return parsed;
 }
@@ -216,6 +236,21 @@ function resolveProvider(args) {
   if (p === "anthropic") return "anthropic";
   if (p === "claude") return "claude";
   return null; // 未指定（含旧 auto）不再默认 claude——spawn 完整 CC 子进程慢且依赖 CC 装
+}
+
+// provider 分发单一调用点：批次与小批次重试共用，避免 if/else-if 链重复两份。
+async function callProvider(provider, batch, args, apiKey) {
+  if (provider === "openai") return translateOpenAI(batch, args, apiKey);
+  if (provider === "anthropic") return translateAnthropic(batch, args, apiKey);
+  return translateClaude(batch);
+}
+
+// 译文 map 校验：必须是「非数组的普通对象」。provider 解析后 Object.assign 前调用。
+function assertTranslationsMap(map, provider) {
+  if (!map || typeof map !== "object" || Array.isArray(map)) {
+    throw new Error(`译文非 id 到 zh 的对象 (${provider})`);
+  }
+  return map;
 }
 
 async function main() {
@@ -248,29 +283,24 @@ async function main() {
   const translations = {};
   if (provider === "stdin") {
     // 本宿主 agent 翻译：stdin 是 {id: zh}，一次全读，不分批
-    Object.assign(translations, await translateStdin());
+    const map = await translateStdin();
+    Object.assign(translations, assertTranslationsMap(map, provider));
   } else {
     // 默认 10（非顶级推理 API 如 MiniMax/GLM 扛不住 30），可 SKILL_I18N_BATCH 调
     const BATCH = Number.parseInt(process.env.SKILL_I18N_BATCH || "10", 10) || 10;
     for (let i = 0; i < toDo.length; i += BATCH) {
       const batch = toDo.slice(i, i + BATCH);
       try {
-        let map;
-        if (provider === "openai") map = await translateOpenAI(batch, args, apiKey);
-        else if (provider === "anthropic") map = await translateAnthropic(batch, args, apiKey);
-        else map = await translateClaude(batch);
-        Object.assign(translations, map);
+        const map = await callProvider(provider, batch, args, apiKey);
+        Object.assign(translations, assertTranslationsMap(map, provider));
       } catch (e) {
         console.error(`[translate] 批次失败 (${provider}): ${e.message}，降级小批次重试`);
         const SUB = Number.parseInt(process.env.SKILL_I18N_SUB || "1", 10) || 1; // 最终兜底单条（推理 API 小批仍失败时）
         for (let j = 0; j < batch.length; j += SUB) {
           const sub = batch.slice(j, j + SUB);
           try {
-            let m;
-            if (provider === "openai") m = await translateOpenAI(sub, args, apiKey);
-            else if (provider === "anthropic") m = await translateAnthropic(sub, args, apiKey);
-            else m = await translateClaude(sub);
-            Object.assign(translations, m);
+            const m = await callProvider(provider, sub, args, apiKey);
+            Object.assign(translations, assertTranslationsMap(m, provider));
           } catch (e2) {
             console.error(`[translate] 小批次重试仍失败，跳过 ${sub.length} 条`);
           }
