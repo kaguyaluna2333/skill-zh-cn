@@ -13,7 +13,7 @@ const collect = require("./lib/collect");
 const fm = require("./lib/frontmatter");
 const meta = require("./lib/metadata");
 const cache = require("./lib/cache");
-const { cjkRatio, CJK_RATIO_THRESHOLD } = require("./lib/cjk");
+const { cjkRatio, cjkCount, CJK_RATIO_THRESHOLD, CJK_COUNT_THRESHOLD } = require("./lib/cjk");
 const { readText } = require("./lib/io");
 
 function parseArgs(argv) {
@@ -72,7 +72,7 @@ function main() {
     const en = parsed.desc ? parsed.desc.value : null;
     if (en === null) { skip.push({ path: f.path, reason: "no-description" }); continue; }
     if (en.trim() === "") { skip.push({ path: f.path, reason: "empty-description" }); continue; }
-    if (cjkRatio(en) > CJK_RATIO_THRESHOLD) { skip.push({ path: f.path, reason: "already-zh" }); continue; }
+    if (cjkRatio(en) > CJK_RATIO_THRESHOLD || cjkCount(en) >= CJK_COUNT_THRESHOLD) { skip.push({ path: f.path, reason: "already-zh" }); continue; }
     enqueue(toTranslate, cached, cacheData, en, { path: f.path, kind: f.kind });
   }
 
@@ -85,7 +85,7 @@ function main() {
     if (descs.length === 0) { skip.push({ path: f.path, reason: "no-description" }); continue; }
     for (const d of descs) {
       if (meta.isPathTranslated(obj, d.jsonPath)) continue;
-      if (cjkRatio(d.en) > CJK_RATIO_THRESHOLD) continue;
+      if (cjkRatio(d.en) > CJK_RATIO_THRESHOLD || cjkCount(d.en) >= CJK_COUNT_THRESHOLD) continue;
       enqueue(toTranslate, cached, cacheData, d.en, { path: f.path, kind: "metadata", jsonPath: d.jsonPath });
     }
   }
